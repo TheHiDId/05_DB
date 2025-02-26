@@ -424,22 +424,47 @@ WHERE (JOB_CODE, SALARY) IN (
 -- 상관쿼리는 먼저 메인쿼리 한 행을 조회하고
 -- 해당 행이 서브쿼리의 조건을 충족하는지 확인하여 SELECT를 진행함
 
-
 -- 사수가 있는 직원의 사번, 이름, 부서명, 사수사번 조회
-
-
+-- EXISTS(서브쿼리): 조회 결과가 1행 이상 존재하면 참, 0행이면 거짓
+SELECT MAIN.EMP_ID, MAIN.EMP_NAME, D.DEPT_TITLE, MAIN.MANAGER_ID
+FROM EMPLOYEE MAIN
+LEFT JOIN DEPARTMENT D ON (MAIN.DEPT_CODE = D.DEPT_ID)
+WHERE EXISTS(
+	SELECT '사수 있음'
+	FROM EMPLOYEE SUB
+	WHERE SUB.EMP_ID = MAIN.MANAGER_ID 
+);
+/* 상호연관 서브쿼리 해석 순서
+ * 1. 메인쿼리 1줄을 해석
+ * 2. 해석된 메인쿼리 행의 컬럼값을 서브쿼리에서 사용
+ * 3. (메인쿼리 WHERE절의 경우) 서브쿼리의 결과가 먼저 해석된 메인쿼리 1행에 영향을 끼침
+ */
 
 -- 직급별 급여 평균보다 급여를 많이 받는 직원의 
 -- 이름, 직급코드, 급여 조회
-
-
+SELECT MAIN.EMP_NAME, MAIN.JOB_CODE, MAIN.SALARY 
+FROM EMPLOYEE MAIN
+WHERE SALARY > (
+	SELECT AVG(SUB.SALARY)
+	FROM EMPLOYEE SUB
+	WHERE SUB.JOB_CODE = MAIN.JOB_CODE 
+);
 
 -- 부서별 입사일이 가장 빠른 사원의
---    사번, 이름, 부서명(NULL이면 '소속없음'), 직급명, 입사일을 조회하고
---    입사일이 빠른 순으로 조회하세요
---    단, 퇴사한 직원은 제외하고 조회하세요
-
-
+-- 사번, 이름, 부서명(NULL이면 '소속없음'), 직급명, 입사일을 조회하고
+-- 입사일이 빠른 순으로 조회하세요
+-- 단, 퇴사한 직원은 제외하고 조회하세요
+SELECT MAIN.EMP_ID, MAIN.EMP_NAME, NVL(D.DEPT_TITLE, '소속 없음') AS DEPT_TITLE, J.JOB_NAME, MAIN.HIRE_DATE 
+FROM EMPLOYEE MAIN
+LEFT JOIN DEPARTMENT D ON (MAIN.DEPT_CODE = D.DEPT_ID)
+JOIN JOB J ON (MAIN.JOB_CODE= J.JOB_CODE)
+WHERE MAIN.HIRE_DATE = (
+	SELECT MIN(SUB.HIRE_DATE)
+	FROM EMPLOYEE SUB
+	WHERE NVL(SUB.DEPT_CODE, '소속 없음') = NVL(MAIN.DEPT_CODE, '소속 없음') 
+	AND SUB.ENT_YN = 'N'
+)
+ORDER BY MAIN.HIRE_DATE ASC;
 
 ----------------------------------------------------------------------------------
 
@@ -449,18 +474,36 @@ WHERE (JOB_CODE, SALARY) IN (
 
 -- 각 직원들이 속한 직급의 급여 평균 조회
 
+-- 1. 각 직급의 급여 평균
+SELECT AVG(SALARY)
+FROM EMPLOYEE 
+WHERE JOB_CODE = 'J6';
 
+-- 2. 각 직원들이 속한 직급의 급여 평균
+SELECT MAIN.EMP_NAME, MAIN.JOB_CODE, (
+	SELECT AVG(SUB.SALARY)
+	FROM EMPLOYEE SUB
+	WHERE SUB.JOB_CODE = MAIN.JOB_CODE 
+) AS "직급 평균"
+FROM EMPLOYEE MAIN
+ORDER BY MAIN.EMP_ID ASC;
 
 -- 모든 사원의 사번, 이름, 관리자사번, 관리자명을 조회
 -- 단 관리자가 없는 경우 '없음'으로 표시
 -- (스칼라 + 상관 쿼리)
-
-
-
-
+SELECT MAIN.EMP_ID, MAIN.EMP_NAME, NVL((
+	SELECT SUB1.EMP_ID
+	FROM EMPLOYEE SUB1
+	WHERE SUB1.EMP_ID = MAIN.MANAGER_ID 
+), '없음') AS "관리자 사번", NVL((
+	SELECT SUB2.EMP_NAME
+	FROM EMPLOYEE SUB2
+	WHERE SUB2.EMP_ID = MAIN.MANAGER_ID 
+), '없음') AS "관리자 이름"
+FROM EMPLOYEE MAIN
+ORDER BY MAIN.EMP_ID ASC;
 
 -----------------------------------------------------------------------
-
 
 -- 7. 인라인 뷰(INLINE-VIEW)
 --    FROM 절에서 서브쿼리를 사용하는 경우로
@@ -469,13 +512,30 @@ WHERE (JOB_CODE, SALARY) IN (
 -- 인라인뷰를 활용한 TOP-N분석
 -- 전 직원 중 급여가 높은 상위 5명의
 -- 순위, 이름, 급여 조회
+SELECT EMP_NAME, SALARY 
+FROM EMPLOYEE 
+ORDER BY SALARY DESC;
 
-
-
-
+-- 급여 내림차순으로 정렬 후 ROWNUM <= 5 조회
+-- ROWNUM: 행 번호를 나타내는 가상 컬럼
+SELECT ROWNUM, EMP_NAME, SALARY 
+FROM (
+	SELECT EMP_NAME, SALARY
+	FROM EMPLOYEE 
+	ORDER BY SALARY DESC
+)
+WHERE ROWNUM <= 5;
 
 -- 급여 평균이 3위 안에 드는 부서의 부서코드와 부서명, 평균급여를 조회
-
+SELECT ROWNUM, "부서코드", "부서명", "급여 평균" 
+FROM (
+	SELECT NVL(E.DEPT_CODE, '없음') AS "부서코드", NVL(D.DEPT_TITLE, '없음') AS "부서명", FLOOR(AVG(E.SALARY)) AS "급여 평균"
+	FROM EMPLOYEE E
+	LEFT JOIN DEPARTMENT D ON (E.DEPT_CODE = D.DEPT_ID) 
+	GROUP BY E.DEPT_CODE, D.DEPT_TITLE
+	ORDER BY "급여 평균" DESC
+)
+WHERE ROWNUM <= 3;
 
 ------------------------------------------------------------------------
 
@@ -484,22 +544,134 @@ WHERE (JOB_CODE, SALARY) IN (
 --    인라인뷰로 사용될 서브쿼리에 주로 사용됨
 --    실행 속도도 빨라진다는 장점이 있다. 
 
--- 
 -- 전 직원의 급여 순위 
 -- 순위, 이름, 급여 조회
+SELECT EMP_NAME, SALARY 
+FROM EMPLOYEE 
+ORDER BY SALARY DESC;
+
+WITH DESC_SALARY 
+AS (
+	SELECT EMP_NAME, SALARY 
+	FROM EMPLOYEE 
+	ORDER BY SALARY DESC
+)
+
+SELECT ROWNUM AS "순위", EMP_NAME, SALARY
+FROM DESC_SALARY
+WHERE ROWNUM <= 10;
 
 --------------------------------------------------------------------------
-
 
 -- 9. RANK() OVER / DENSE_RANK() OVER
 
 -- RANK() OVER : 동일한 순위 이후의 등수를 동일한 인원 수 만큼 건너뛰고 순위 계산
 --               EX) 공동 1위가 2명이면 다음 순위는 2위가 아니라 3위
-
-
+SELECT RANK() OVER (ORDER BY SALARY DESC) AS "순위", EMP_NAME, SALARY 
+FROM EMPLOYEE;
 
 -- DENSE_RANK() OVER : 동일한 순위 이후의 등수를 이후의 순위로 계산
 --                     EX) 공동 1위가 2명이어도 다음 순위는 2위
+SELECT DENSE_RANK() OVER (ORDER BY SALARY DESC) AS "순위", EMP_NAME, SALARY 
+FROM EMPLOYEE;
 
+/* [ROWNUM 사용 시 주의사항]
+ * ROWNUM이 WHERE절에 사용되는 경우 항상 1부터 연속적인 범위가 지정되어야 함
+ * 
+ * ROWNUM은 결과 집합이 완성된 후 부여되는 가상의 컬럼으로써 정해진 규칙을 만족하지 못하면 사용 불가
+ */
 
+-- 급여 순위 상위 3 ~ 7등 조회
+SELECT "순위", EMP_NAME, SALARY
+FROM (
+	SELECT RANK() OVER (ORDER BY SALARY DESC) AS "순위", EMP_NAME, SALARY 
+	FROM EMPLOYEE
+)
+WHERE "순위" BETWEEN 3 AND 7;
 
+-- 1. 전지연 사원이 속해있는 부서원들을 조회하시오 (단, 전지연은 제외)
+-- 사번, 사원명, 전화번호, 고용일, 부서명
+SELECT E.EMP_ID AS "사번", E.EMP_NAME AS "사원명", E.PHONE AS "전화번호", E.HIRE_DATE AS "고용일", D.DEPT_TITLE AS "부서명"
+FROM EMPLOYEE E
+JOIN DEPARTMENT D ON (E.DEPT_CODE = D.DEPT_ID)
+WHERE E.DEPT_CODE = (
+	SELECT DEPT_CODE 
+	FROM EMPLOYEE
+	WHERE EMP_NAME = '전지연'
+) AND E.EMP_NAME != '전지연'
+ORDER BY "사번";
+
+-- 2. 고용일이 2010년도 이후인 사원들 중 급여가 가장 높은 사원의
+-- 사번, 사원명, 전화번호, 급여, 직급명을 조회하시오.
+SELECT "사번", "사원명", "전화번호", "급여", "직급명"
+FROM (
+	SELECT E.EMP_ID AS "사번", E.EMP_NAME AS "사원명", E.PHONE AS "전화번호", E.SALARY AS "급여", J.JOB_NAME AS "직급명"
+	FROM EMPLOYEE E
+	JOIN JOB J ON (E.JOB_CODE = J.JOB_CODE)
+	WHERE EXTRACT(YEAR FROM E.HIRE_DATE) >= 2010 
+	ORDER BY "급여" DESC
+) 
+WHERE ROWNUM = 1;
+
+-- 3. 노옹철 사원과 같은 부서, 같은 직급인 사원을 조회하시오. (단, 노옹철 사원은 제외)
+-- 사번, 이름, 부서코드, 직급코드, 부서명, 직급명
+SELECT E.EMP_ID, E.EMP_NAME, E.DEPT_CODE, E.JOB_CODE, D.DEPT_TITLE, J.JOB_NAME 
+FROM EMPLOYEE E
+JOIN DEPARTMENT D ON (E.DEPT_CODE = D.DEPT_ID)
+JOIN JOB J ON (E.JOB_CODE = J.JOB_CODE)
+WHERE (E.DEPT_CODE, E.JOB_CODE) = (
+	SELECT DEPT_CODE, JOB_CODE
+	FROM EMPLOYEE 
+	WHERE EMP_NAME = '노옹철'
+) AND E.EMP_NAME != '노옹철';
+
+-- 4. 2010년도에 입사한 사원과 부서와 직급이 같은 사원을 조회하시오
+-- 사번, 이름, 부서코드, 직급코드, 고용일
+SELECT EMP_ID, EMP_NAME, DEPT_CODE, JOB_CODE, HIRE_DATE 
+FROM EMPLOYEE 
+WHERE (DEPT_CODE, JOB_CODE) = (
+ SELECT DEPT_CODE, JOB_CODE 
+ FROM EMPLOYEE 
+ WHERE EXTRACT(YEAR FROM HIRE_DATE) = 2010
+);
+
+-- 5. 87년생 여자 사원과 동일한 부서이면서 동일한 사수를 가지고 있는 사원을 조회하시오
+-- 사번, 이름, 부서코드, 사수번호, 주민번호, 고용일
+SELECT EMP_ID, EMP_NAME, DEPT_CODE, MANAGER_ID, EMP_NO, HIRE_DATE 
+FROM EMPLOYEE 
+WHERE (DEPT_CODE, MANAGER_ID) = (
+	SELECT DEPT_CODE, MANAGER_ID 
+	FROM EMPLOYEE 
+	WHERE EMP_NO LIKE '87%' AND SUBSTR(EMP_NO, 8, 1) IN ('2', '4') 
+);
+
+-- 6. 부서별 입사일이 가장 빠른 사원의
+-- 사번, 이름, 부서명(NULL이면 '소속없음'), 직급명, 입사일을 조회하고
+-- 입사일이 빠른 순으로 조회하시오
+-- 단, 퇴사한 직원은 제외하고 조회.
+SELECT E.EMP_ID, E.EMP_NAME, NVL(D.DEPT_TITLE, '소속 없음'), J.JOB_NAME, E.HIRE_DATE 
+FROM EMPLOYEE E
+LEFT JOIN DEPARTMENT D ON (E.DEPT_CODE = D.DEPT_ID)
+JOIN JOB J ON (E.JOB_CODE = J.JOB_CODE)
+WHERE E.HIRE_DATE IN (
+	SELECT MIN(HIRE_DATE)
+	FROM EMPLOYEE
+	GROUP BY JOB_CODE
+) AND E.ENT_YN = 'N'
+ORDER BY HIRE_DATE ASC;
+
+-- 7. 직급별 나이가 가장 어린 직원의
+-- 사번, 이름, 직급명, 만 나이, 보너스 포함 연봉( (급여 * (1 + 보너스)) * 12)을 조회하고
+-- 나이순으로 내림차순 정렬하세요
+-- 단 연봉은 \124,800,000 으로 출력되게 하세요. (\ : 원 단위 기호)
+SELECT E.EMP_ID, E.EMP_NAME, J.JOB_NAME, 
+			FLOOR(MONTHS_BETWEEN(SYSDATE, TO_DATE('19'||SUBSTR(E.EMP_NO, 1, 6), 'YYYY-MM-DD')) / 12) AS "만 나이",
+			TO_CHAR((SALARY * (1 + NVL(BONUS, 0))) * 12, 'L999,999,999') AS "보너스 포함 연봉"   
+FROM EMPLOYEE E
+JOIN JOB J ON (E.JOB_CODE = J.JOB_CODE)
+WHERE EMP_NO IN (
+	SELECT MAX(EMP_NO)
+	FROM EMPLOYEE 
+	GROUP BY JOB_CODE
+)
+ORDER BY "만 나이" DESC;
